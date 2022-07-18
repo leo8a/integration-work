@@ -1,0 +1,105 @@
+---
+- name: Deploy Advanced Cluster Management (ACM) for Kubernetes -> Install ACM
+  hosts: localhost
+
+  tasks:
+    - name: Get ACM operator data from PackageManifest
+      k8s_info:
+        api_version: packages.operators.coreos.com/v1
+        kind: PackageManifest
+        name: advanced-cluster-management
+        namespace: open-cluster-management
+      register: acm_object
+
+    - name: Set available Channel and Source Catalog index for ACM
+      set_fact:
+        acm_channel_version: "{{ acm_object.resources | json_query('[0].status.defaultChannel') }}"
+        acm_source_catalog_index: "{{ acm_object.resources | json_query('[0].status.catalogSource') }}"
+
+    - name: Create ACM subscription from template
+      template:
+        src: templates/02_acm_subscription.yaml.j2
+        dest: manifests/02_acm_subscription.yaml
+
+    - name: Create ACM namespace
+      k8s:
+        state: present
+        src: manifests/00_acm_namespace.yaml
+
+    - name: Create ACM operator group
+      k8s:
+        state: present
+        src: manifests/01_acm_operator_group.yaml
+
+    - name: Create ACM subscription
+      k8s:
+        state: present
+        src: manifests/02_acm_subscription.yaml
+
+
+- name: Deploy Advanced Cluster Management (ACM) for Kubernetes -> Verify ACM install
+  hosts: localhost
+
+  tasks:
+    - name: Check ACM operator group (timeout - 20 mins)
+      k8s:
+        api_version: operators.coreos.com/v1
+        kind: OperatorGroup
+        name: open-cluster-management
+        namespace: open-cluster-management
+        state: present
+        wait: true
+        wait_timeout: 1200
+
+    - name: Check ACM subscription (timeout - 20 mins)
+      k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: advanced-cluster-management
+        namespace: open-cluster-management
+        state: present
+        wait: true
+        wait_timeout: 1200
+        wait_condition:
+          type: CatalogSourcesUnhealthy
+          status: "False"
+          reason: AllCatalogSourcesHealthy
+
+
+- name: Deploy Advanced Cluster Management (ACM) for Kubernetes -> Configure ACM via MCH
+  hosts: localhost
+
+  tasks:
+    - name: Create MultiClusterHub (MCH) via CR
+      k8s:
+        state: present
+        src: manifests/03_acm_multiclusterhub.yaml
+      register: mch_api
+      retries: 5
+      delay: 10
+      until: mch_api is not failed
+      ignore_errors: True
+
+
+- name: Deploy Advanced Cluster Management (ACM) for Kubernetes -> Verify ACM configuration
+  hosts: localhost
+
+  tasks:
+    - name: Check MultiClusterHub (MCH) deployment (timeout ~50 mins)
+      k8s:
+        api_version: operator.open-cluster-management.io/v1
+        kind: MultiClusterHub
+        name: multiclusterhub
+        namespace: open-cluster-management
+        state: present
+        wait: true
+        wait_timeout: 2400
+        wait_condition:
+          type: Complete
+          status: "True"
+          reason: ComponentsAvailable
+      register: mch_deployment
+      retries: 10
+      delay: 30
+      until: mch_deployment is not failed
+      ignore_errors: True

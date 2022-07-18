@@ -1,0 +1,137 @@
+name: Deploy OpenShift Compact (3:0) Hub Cluster
+
+on:
+  workflow_dispatch:
+    inputs:
+      OCP_CLUSTER_NAME:
+        description: The name of the OpenShift Compact (3:0) Hub Cluster to deploy
+        default: ipv4v6-cluster
+        required: true
+
+      OCP_RELEASE_VERSION:
+        description: The version of the OpenShift release to deploy
+        default: 4.10.16
+        required: true
+
+      LOCAL_REGISTRY_TYPE:
+        description: Select from Quay, [WIP] Docker, or [WIP] jFrog
+        default: Quay
+        required: true
+
+      LOCAL_SECRET_JSON:
+        description: The path to the local pull_secret.json file
+        default: /root/pull_secret.json
+        required: true
+
+      RUNNER:
+        description: Github Action Runner Tag
+        default: cnf-runner
+        required: true
+
+      CLEANUP_ENV:
+        description: Cleanup environment before deploying
+        default: 'yes'
+        required: true
+
+
+env:
+  OCP_CLUSTER_NAME: ${{ github.event.inputs.OCP_CLUSTER_NAME }}
+  OCP_RELEASE_VERSION: ${{ github.event.inputs.OCP_RELEASE_VERSION }}
+
+  XDG_RUNTIME_DIR: /run/user/0
+  LOCAL_SECRET_JSON: ${{ github.event.inputs.LOCAL_SECRET_JSON }}
+  LOCAL_REGISTRY_TYPE: ${{ github.event.inputs.LOCAL_REGISTRY_TYPE }}
+
+
+jobs:
+  checkout_code:
+    runs-on: ${{ github.event.inputs.RUNNER }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+  prereqs_bastion:
+    needs: [ checkout_code ]
+    runs-on: ${{ github.event.inputs.RUNNER }}
+
+    steps:
+      - name: Run cleanup script
+        if: ${{ github.event.inputs.CLEANUP_ENV == 'yes' }}
+        run: ./0_openshift_compact_hub/cleanup.sh
+
+      - name: Bootstrap Bastion Node
+        run: ansible-playbook ./0_openshift_compact_hub/prereqs/playbooks/00_bastion_bootstrap.yml
+
+  prereqs_network:
+    needs: [ prereqs_bastion ]
+    runs-on: ${{ github.event.inputs.RUNNER }}
+
+    steps:
+      - name: Configure Virtual Network interface
+        run: ansible-playbook ./0_openshift_compact_hub/prereqs/playbooks/01_network_dualstack_virtual.yml
+
+      - name: Configure DNS and DHCP
+        run: ./0_openshift_compact_hub/prereqs/hacks/01_network_dns_dhcp.sh
+
+      - name: Configure RaDvD and NTP
+        run: ./0_openshift_compact_hub/prereqs/hacks/01_network_radvd_ntp.sh
+
+  prereqs_local_registry:
+    needs: [ prereqs_network ]
+    runs-on: ${{ github.event.inputs.RUNNER }}
+
+    steps:
+      - name: Deploy Local Registry with Quay
+        if: ${{ github.event.inputs.LOCAL_REGISTRY_TYPE == 'Quay' }}
+        run: ./0_openshift_compact_hub/prereqs/hacks/02_registry_local_quay.sh
+
+      - name: Deploy Local Registry with Docker
+        if: ${{ github.event.inputs.LOCAL_REGISTRY_TYPE == 'Docker' }}
+        run: echo "(TODO) Deploy Local Registry with Docker"
+
+      - name: Deploy Local Registry with jFrog
+        if: ${{ github.event.inputs.LOCAL_REGISTRY_TYPE == 'jFrog' }}
+        run: echo "(TODO) Deploy Local Registry with jFrog"
+
+      - name: Mirror OCP release images to local registry
+        run: ./0_openshift_compact_hub/prereqs/hacks/02_registry_mirror_ocp_release.sh
+
+      - name: Mirror OLM operator images to local registry
+        run: ./0_openshift_compact_hub/prereqs/hacks/02_registry_mirror_olm.sh
+
+      - name: Extract OCP bare metal installer from local registry
+        run: ./0_openshift_compact_hub/prereqs/hacks/02_registry_ocp_bm_installer.sh
+
+  prereqs_local_httpd:
+    needs: [ prereqs_local_registry ]
+    runs-on: ${{ github.event.inputs.RUNNER }}
+
+    steps:
+      - name: Deploy Local HTTP Server
+        run: ansible-playbook ./0_openshift_compact_hub/prereqs/playbooks/03_httpd_local_server.yml
+
+      - name: Cache OS images to local HTTP server
+        run: ./0_openshift_compact_hub/prereqs/hacks/03_httpd_os_images_cache.sh
+
+  prereqs_local_proxy:
+    needs: [ prereqs_local_httpd ]
+    runs-on: ${{ github.event.inputs.RUNNER }}
+
+    steps:
+      - name: Deploy Local Proxy Server
+        run: ./0_openshift_compact_hub/prereqs/hacks/04_haproxy_local_server.sh
+
+  deploy_cluster:
+    needs: [ prereqs_local_proxy ]
+    runs-on: ${{ github.event.inputs.RUNNER }}
+
+    steps:
+      - name: Create VMs for OpenShift Compact (3:0) Hub Cluster
+        run: ./0_openshift_compact_hub/deploy/hacks/00_create_cluster_vms.sh
+
+      - name: Prepare install-config.yaml file
+        run: ./0_openshift_compact_hub/deploy/hacks/01_prepare_install_config.sh
+
+      - name: Deploy OpenShift Compact (3:0) Hub Cluster
+        run: ./0_openshift_compact_hub/deploy/hacks/02_deploy_cluster.sh

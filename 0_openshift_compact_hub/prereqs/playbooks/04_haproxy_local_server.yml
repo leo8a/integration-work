@@ -1,0 +1,34 @@
+---
+- name: Deploy local Proxy server -> Install Haproxy as a systemd service
+  hosts: localhost
+
+  tasks:
+    - name: Copy Haproxy configuration file
+      copy:
+        src: haproxy/haproxy.cfg
+        dest: /etc/quay-install/haproxy.cfg
+
+    - name: Install Haproxy as systemd unit
+      copy:
+          src: systemd/podman-haproxy.service
+          dest: /usr/lib/systemd/system/podman-haproxy.service
+
+    - name: Start and Enable the HTTPD systemd service
+      service:
+          name: podman-httpd.service
+          daemon_reload: yes
+          state: started
+          enabled: yes
+
+
+- name: Deploy local Proxy server -> Check Haproxy server's endpoints
+  hosts: localhost
+
+  tasks:
+    - name: Check if HTTPD is serving via IPv6
+      command: curl -v http://"[2620:52:0:1305::1]":9000
+      register: httpd_svc
+      retries: 5
+      delay: 10
+      until: httpd_svc is not failed
+      ignore_errors: True

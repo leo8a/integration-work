@@ -1,0 +1,81 @@
+---
+- name: Deploy Quay Registry -> Install container-tools
+  hosts: localhost
+
+  tasks:
+    - name: Install container-tools module packages
+      dnf:
+        name: '@container-tools'
+        state: present
+
+    - name: Configure aliases for Podman
+      lineinfile:
+        path: /root/.bashrc
+        line: "{{ item }}"
+        state: present
+      with_items:
+        - "# podman aliases"
+        - "alias pd='podman'"
+        - "alias pds='podman ps'"
+        - "alias pdi='podman images'"
+
+
+- name: Deploy Quay Registry -> Get mirror-registry tool
+  hosts: localhost
+
+  tasks:
+    - name: Get mirror-registry binaries
+      unarchive:
+        src: https://github.com/quay/mirror-registry/releases/latest/download/mirror-registry-online.tar.gz
+        dest: /usr/bin
+        remote_src: yes
+
+
+- name: Deploy Quay Registry -> Install Quay using mirror-registry
+  hosts: localhost
+
+  tasks:
+    - name: Determine if registry is already deployed
+      stat:
+        path: /etc/quay-install
+      register: quay_install_folder
+
+    - name: Deploy Quay (disconnected) registry
+      command: >
+        mirror-registry install --verbose \
+                                --initUser init \
+                                --initPassword init
+      when: quay_install_folder.stat.islnk is not defined
+
+    - name: Remove Quay installation artifacts (i.e. pause.tar, postgres.tar, quay.tar, redis.tar)
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - pause.tar
+        - postgres.tar
+        - quay.tar
+        - redis.tar
+
+    - name: Copy Quay certificate to source system anchors
+      copy:
+        src: /etc/quay-install/quay-rootCA/rootCA.pem
+        dest: /etc/pki/ca-trust/source/anchors/
+        remote_src: yes
+      register: ca_trust_certificate
+
+    - name: Update Quay CA certificate
+      command: >
+        update-ca-trust
+      when: ca_trust_certificate.changed
+
+
+- name: Deploy Quay Registry -> Validate Quay registry
+  hosts: localhost
+
+  tasks:
+    - name: Login to Quay (disconnected) registry
+      containers.podman.podman_login:
+        username: init
+        password: 100Mgmt-
+        registry: "{{ ansible_nodename }}:8443"

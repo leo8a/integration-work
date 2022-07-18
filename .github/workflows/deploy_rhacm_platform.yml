@@ -1,0 +1,45 @@
+name: Deploy Red Hat Advanced Cluster Management (RHACM) for Kubernetes
+
+on:
+  workflow_dispatch:
+    inputs:
+      KUBECONFIG:
+        description: Kubernetes Config File
+        default: /root/.kube/config
+        required: true
+
+      RUNNER:
+        description: Github Action Runner Tag
+        default: cnf-runner
+        required: true
+
+      CLEANUP_ENV:
+        description: Cleanup environment before deploying
+        default: 'no'
+        required: true
+
+
+env:
+  DESTROY_YES: DESTROY
+  KUBECONFIG: ${{ github.event.inputs.KUBECONFIG }}
+
+
+jobs:
+  checkout_code:
+    runs-on: ${{ github.event.inputs.RUNNER }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+  deploy_rhacm:
+    needs: [ checkout_code ]
+    runs-on: ${{ github.event.inputs.RUNNER }}
+
+    steps:
+      - name: Run cleanup script
+        if: ${{ github.event.inputs.CLEANUP_ENV == 'yes' }}
+        run: ./1_rhacm/cleanup.sh
+
+      - name: Deploy RHACM
+        run: ansible-playbook ./1_rhacm/playbooks/00_rhacm_deploy.yml
