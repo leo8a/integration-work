@@ -1,0 +1,11 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: advanced-cluster-management
+  namespace: open-cluster-management
+spec:
+  channel: "{{ acm_channel_version }}"
+  installPlanApproval: Automatic
+  name: advanced-cluster-management
+  source: "{{ acm_source_catalog_index }}"
+  sourceNamespace: openshift-marketplace

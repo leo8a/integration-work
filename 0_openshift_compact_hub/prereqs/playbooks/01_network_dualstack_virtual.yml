@@ -1,0 +1,108 @@
+---
+- name: Configure virtual network -> Install KCLI dependencies
+  hosts: localhost
+
+  tasks:
+    - name: Install libvirt packages
+      dnf:
+        name:
+          - libvirt
+          - libvirt-daemon-driver-qemu
+          - qemu-kvm
+        state: present
+
+    - name: Add {{ ansible_user_id }} user to qemu and libvirt groups
+      user:
+        name: "{{ ansible_user_id }}"
+        groups: qemu,libvirt
+        append: yes
+
+    - name: Enable and start libvirtd service
+      service:
+        name: libvirtd
+        state: started
+        enabled: yes
+
+
+- name: Configure virtual network -> Install KCLI tool
+  hosts: localhost
+
+  tasks:
+#    - name: Add KCLI package repository
+#      community.general.copr:
+#        name: karmab/kcli
+#        state: enabled
+#        chroot: epel-8-x86_64
+
+    - name: Install KCLI tool
+      dnf:
+        name: kcli
+        state: latest
+
+    - name: Determine if pool folder exists
+      stat:
+        path: /var/lib/libvirt/images
+      register: image_pool_folder
+
+    - name: Create KCLI image pool
+      shell: sudo kcli create pool -p /var/lib/libvirt/images default
+      when: image_pool_folder.stat.islnk is not defined
+
+    - name: Set ACL information to image pool folder
+      ansible.posix.acl:
+        path: /var/lib/libvirt/images
+        entity: "{{ ansible_user_id }}"
+        etype: user
+        permissions: rwx
+        state: present
+
+
+- name: Configure virtual network -> Patch kernel networking
+  hosts: localhost
+
+  tasks:
+    - name: Accept RA packets to configure IPv6
+      sysctl:
+        name: net.ipv6.conf.all.accept_ra
+        value: '2'
+        state: present
+
+    - name: Enable IPv6 forwarding in all interfaces
+      sysctl:
+        name: net.ipv6.conf.all.forwarding
+        value: '1'
+        state: present
+
+    - name: Disable IPv6 address in loopback interface
+      sysctl:
+        name: net.ipv6.conf.lo.disable_ipv6
+        value: '0'
+        state: present
+
+    - name: Enable IPv4 forwarding in all interfaces
+      sysctl:
+        name: net.ipv4.conf.all.forwarding
+        value: '1'
+        state: present
+
+    # Current recommended practice in RFC3704 is to enable strict mode
+    # to prevent IP spoofing from DDos attacks. If using asymmetric routing
+    # or other complicated routing, then loose mode is recommended.
+    # Article: https://access.redhat.com/solutions/53031
+    - name: Set loose mode to netfilter when validating IPv4 packets
+      sysctl:
+        name: net.ipv4.conf.all.rp_filter
+        value: '2'
+        state: present
+
+
+- name: Configure virtual network -> Create virtualized network
+  hosts: localhost
+
+  tasks:
+    - name: Create virtualized IPv6 network
+      command: >
+        kcli create network -c "2620:52:0:1305::0/64" -d "172.16.100.0/24" \
+                            --domain ipv4v6.e2e.bos.redhat.com --nodhcp \
+                            networkipv4v6
+      when: "'networkipv4v6' not in {{ ansible_interfaces }}"

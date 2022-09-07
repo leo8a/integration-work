@@ -1,0 +1,29 @@
+---
+- name: Deploy local HTTP server -> Install HTTPD as a systemd service
+  hosts: localhost
+
+  tasks:
+    - name: Create folder for HTTPD server content
+      file:
+        path: /opt/httpd
+        state: directory
+
+    # This is handy to avoid any possible timeout afterwards when starting
+    # the podman-httpd.service. These timeouts may happen when downloading
+    # the HTTPD container image over a restricted network.
+    - name: Download HTTPD server container image
+      podman_image:
+        name: registry.centos.org/centos/httpd-24-centos7
+        tag: latest
+
+    - name: Install HTTPD as systemd unit
+      copy:
+        src: systemd/podman-httpd.service
+        dest: /etc/systemd/system/podman-httpd.service
+
+    - name: Start and Enable the HTTPD systemd service
+      service:
+        name: podman-httpd.service
+        daemon_reload: yes
+        state: started
+        enabled: yes

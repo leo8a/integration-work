@@ -1,0 +1,10 @@
+### JetBrains ###
+.idea/
+
+### OPM ###
+index*
+bundle*
+*.out
+
+### Env ###
+.env

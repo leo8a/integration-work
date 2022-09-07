@@ -1,0 +1,68 @@
+---
+- name: Boostrap bastion host -> Configure System Journal persistently
+  hosts: localhost
+
+  tasks:
+
+    # This is to preserve the systemd journal logs across reboots
+    # on the bastion host. For RHEL systems, this is simply done
+    # by creating the /var/log/journal directory.
+    # Article: https://access.redhat.com/solutions/696893
+    - name: Ensure /var/log/journal folder exists
+      file:
+        path: /var/log/journal
+        state: directory
+
+
+- name: Boostrap bastion host -> Install SysEng tools
+  hosts: localhost
+
+  tasks:
+
+    # Install some tools to perform system engineering tasks
+    # on the bastion host.
+    - name: Install vim, bash-completion, and htop tools
+      dnf:
+        name:
+          - vim-enhanced
+          - bash-completion
+          - htop
+        state: present
+
+    # Tasty is a CLI to manage (e.g. list, info, install, remove, search) OpenShift operators
+    # in a DNF package fashion.
+    # Repository: https://github.com/karmab/tasty
+    - name: Install tasty tool
+      get_url:
+        url: https://github.com/karmab/tasty/releases/download/v0.8.2/tasty-linux-amd64
+        dest: /usr/bin/tasty
+        mode: '0755'
+
+
+- name: Boostrap bastion host -> Install developer tools
+  hosts: localhost
+
+  vars:
+    grpcurl_version: 1.8.6
+    pull_secret_validator_version: 1.0.6
+
+  tasks:
+    - name: Install git, jq, and tmux tools
+      dnf:
+        name:
+          - git
+          - jq
+          - tmux
+        state: present
+
+    - name: Install k9s, ketall, grpcurl, and pullsecret-validator-cli tools
+      unarchive:
+        src: "{{ item }}"
+        dest: /usr/bin
+        remote_src: yes
+      with_items:
+        - https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_x86_64.tar.gz
+        - https://github.com/corneliusweig/ketall/releases/latest/download/get-all-amd64-linux.tar.gz
+        - https://github.com/fullstorydev/grpcurl/releases/download/v{{ grpcurl_version }}/grpcurl_{{ grpcurl_version }}_linux_x86_64.tar.gz
+        - https://github.com/RHsyseng/pullsecret-validator-cli/releases/download/v{{ pull_secret_validator_version }}/pullsecret-validator-cli-v{{ pull_secret_validator_version }}-linux-amd64.tar.gz
+      changed_when: no
